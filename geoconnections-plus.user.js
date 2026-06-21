@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoConnections+
 // @namespace    jago/geoconnections-solution-viewer
-// @version      3.6.2
+// @version      3.6.3
 // @description  Sortierter Lösungsblock pro Land (Landname · Flagge · Form · Statistik) plus KI-Prompt-Box. Funktioniert auch bei SPA-Navigation (Datenquelle via Inline-HTML oder fetch).
 // @author       jago
 // @license      MIT
