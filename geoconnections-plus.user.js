@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         GeoConnections+
 // @namespace    jago/geoconnections-solution-viewer
-// @version      3.6.3
-// @description  Sortierter Lösungsblock pro Land (Landname · Flagge · Form · Statistik) plus KI-Prompt-Box. Funktioniert auch bei SPA-Navigation (Datenquelle via Inline-HTML oder fetch).
-// @author       jago
+// @version      3.6.4
+// @description  Verbesserter zusätzlicher Lösungsblock plus KI-Prompt-Box.
+// @author       jago/claude
 // @license      MIT
 // @match        https://geotrivia.com/*
 // @icon         https://geotrivia.com/geoconnections-icon.png
@@ -14,7 +14,12 @@
 (function () {
   'use strict';
 
-  console.log('[GC] geladen (v3.6.2) auf', location.href);
+  const VERSION =
+    (typeof GM_info !== 'undefined' &&
+      GM_info.script &&
+      GM_info.script.version) ||
+    '?';
+  console.log('[GC] geladen (v' + VERSION + ') auf', location.href);
 
   const BLOCK_ID = 'gc-sorted-solution';
 
@@ -335,7 +340,11 @@
       const cap = statCaption(g, meta);
       return CATEGORY_PROMPT_MAP[cap] || cap;
     });
-    const pairs = groups.map((g, i) => countries[i] + '/' + cats[i]);
+    const pairs = groups.map((g, i) => {
+      const { stat } = pickItems(g);
+      const value = stat ? stat.value : '';
+      return countries[i] + '/' + cats[i] + ' (' + value + ')';
+    });
     return (
       'Erstelle mir bitte ausschließlich eine Tabelle ohne Zusatzanmerkungen mit den folgenden vier Ländern ' +
       '(zeilenweise mit passendem Flaggen-Emoji) und den folgenden vier Kategorien (Spalten): ' +
@@ -343,10 +352,10 @@
       ' & ' +
       cats.join(', ') +
       '. ' +
-      'Hebe die folgenden Zellen hervor mit einem 🟩 und gefettet: ' +
+      'Recherchiere die korrekten Werte für jede Zelle. ' +
+      'Hebe die folgenden Zellen hervor mit einem 🟩 und gefettet, die Werte in Klammern sollen zusätzlich neben den recherchierten Werten geklammert angezeigt werden: ' +
       pairs.join(', ') +
-      '. ' +
-      'Recherchiere die korrekten Werte für jede Zelle.'
+      '.'
     );
   }
 
@@ -357,16 +366,12 @@
     );
     wrap.id = BLOCK_ID;
 
-    const header = el(
-      'div',
-      'flex items-center justify-between font-sans text-xs sm:text-sm font-bold text-muted-foreground px-1 py-1 sm:py-2 h-10 mb-1',
-    );
-    header.appendChild(el('span', null, 'Lösung (sortiert)'));
-    wrap.appendChild(header);
-
     const meta = data.categoryMeta || {};
-    const groups = [...data.groups].sort(
-      (a, b) => (a.level || 0) - (b.level || 0),
+    const groups = [...data.groups].sort((a, b) =>
+      regionName((a.title || '').toUpperCase()).localeCompare(
+        regionName((b.title || '').toUpperCase()),
+        'de',
+      ),
     );
 
     for (const g of groups) {

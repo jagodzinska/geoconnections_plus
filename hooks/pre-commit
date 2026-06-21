@@ -1,0 +1,35 @@
+#!/bin/sh
+# Verhindert Commits, die das Userscript aendern, ohne die @version zu erhoehen.
+
+FILE="geoconnections-plus.user.js"
+
+# Ist die Datei ueberhaupt im Commit (staged)?
+if ! git diff --cached --name-only | grep -qx "$FILE"; then
+  exit 0
+fi
+
+extract_version() {
+  # liest die @version-Zeile aus stdin
+  sed -n 's/.*@version[[:space:]]*\([0-9][0-9.]*\).*/\1/p' | head -n1
+}
+
+# Version im aktuellen Commit (staged) ...
+NEW_VERSION=$(git show ":$FILE" 2>/dev/null | extract_version)
+
+# ... vs. Version im letzten Commit (HEAD)
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  OLD_VERSION=$(git show "HEAD:$FILE" 2>/dev/null | extract_version)
+else
+  OLD_VERSION=""   # erster Commit
+fi
+
+if [ -n "$OLD_VERSION" ] && [ "$NEW_VERSION" = "$OLD_VERSION" ]; then
+  echo "------------------------------------------------------------" >&2
+  echo "FEHLER: $FILE wurde geaendert, aber @version ist unveraendert" >&2
+  echo "        (noch $OLD_VERSION). Bitte @version hochsetzen." >&2
+  echo "        Notfalls umgehen mit:  git commit --no-verify" >&2
+  echo "------------------------------------------------------------" >&2
+  exit 1
+fi
+
+exit 0
