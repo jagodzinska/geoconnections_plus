@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoConnections+
 // @namespace    jago/geoconnections-solution-viewer
-// @version      3.6.4
+// @version      3.7.0
 // @description  Verbesserter zusätzlicher Lösungsblock plus KI-Prompt-Box.
 // @author       jago/claude
 // @license      MIT
@@ -45,15 +45,31 @@
 
   const TILE =
     'relative bg-card border-2 border-border rounded-xl shadow-neo text-foreground flex items-center justify-center aspect-square overflow-hidden p-1.5';
+  // Schriftgrößen der Kacheln kommen aus eigenem CSS (siehe STYLE): Geotrivia
+  // liefert nur CSS für Tailwind-Klassen, die es selbst benutzt – text-[7px]
+  // & Co. gibt es dort nicht (mehr).
   const CAP_CLS =
-    'mb-1 block w-full max-w-full break-words text-[7px] font-black uppercase leading-[0.95] opacity-40 [overflow-wrap:anywhere] min-[1200px]:text-[8px]';
+    'gc-cap mb-1 block w-full max-w-full break-words font-black uppercase opacity-40 [overflow-wrap:anywhere]';
   const VAL_CLS =
-    'line-clamp-3 w-full max-w-full break-words text-[10px] font-bold leading-[1.1] [overflow-wrap:anywhere] min-[390px]:text-[10.5px] sm:text-[11px] min-[1200px]:text-[12px]';
-  const FALLBACK_COLORS = {
-    1: '#eab308',
-    2: '#22c55e',
-    3: '#3b82f6',
-    4: '#a855f7',
+    'gc-val line-clamp-3 w-full max-w-full break-words font-bold [overflow-wrap:anywhere]';
+  const STYLE_ID = 'gc-sorted-solution-style';
+  const STYLE = `
+    #${BLOCK_ID} .gc-cap { font-size: 7px; line-height: 0.95; }
+    #${BLOCK_ID} .gc-val { font-size: 10px; line-height: 1.1; }
+    #${BLOCK_ID} .gc-prompt { white-space: pre-wrap; opacity: 0.9; }
+    @media (min-width: 390px) { #${BLOCK_ID} .gc-val { font-size: 10.5px; } }
+    @media (min-width: 640px) { #${BLOCK_ID} .gc-val { font-size: 11px; } }
+    @media (min-width: 1200px) {
+      #${BLOCK_ID} .gc-cap { font-size: 8px; }
+      #${BLOCK_ID} .gc-val { font-size: 12px; }
+    }
+  `;
+  // Gruppenfarben der Seite (CSS-Variablen), Hex-Werte nur als Rückfall
+  const GROUP_COLORS = {
+    1: 'var(--color-connection-1, #f8cd55)',
+    2: 'var(--color-connection-2, #8ccd60)',
+    3: 'var(--color-connection-3, #51acf9)',
+    4: 'var(--color-connection-4, #c9aaff)',
   };
 
   const COPY_ICON =
@@ -296,7 +312,7 @@
 
     const body = el(
       'div',
-      'font-sans text-[11px] sm:text-xs leading-snug whitespace-pre-wrap break-words text-foreground/90',
+      'gc-prompt font-sans text-xs leading-snug break-words text-foreground',
     );
     body.textContent = prompt;
 
@@ -380,8 +396,8 @@
       const name = regionName(code);
       const level = g.level || 1;
 
-      const groupBox = el('div', `rounded-2xl p-2 mb-2 bg-connection-${level}`);
-      groupBox.setAttribute('data-gc-level', level);
+      const groupBox = el('div', 'rounded-2xl p-2 mb-2');
+      groupBox.style.backgroundColor = GROUP_COLORS[level] || '#999';
 
       const grid = el('div', 'grid grid-cols-4 gap-1.5');
       grid.appendChild(
@@ -401,59 +417,48 @@
     return wrap;
   }
 
-  function fixGroupBg(root) {
-    root.querySelectorAll('[data-gc-level]').forEach((d) => {
-      const bg = getComputedStyle(d).backgroundColor;
-      if (!bg || bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') {
-        d.style.backgroundColor =
-          FALLBACK_COLORS[d.getAttribute('data-gc-level')] || '#999';
-      }
-    });
-  }
-
-  // Findet die sichtbare Überschrift "Lösung" – nur über den Text, ganz ohne Klassen.
-  function findLabel() {
-    const bySpan = [...document.querySelectorAll('span')].find(
-      (s) => s.textContent.trim() === 'Lösung',
+  // ---- Hängepunkt: gemeinsamer Ergebnis-Screen der Daily-Spiele ----
+  // Seit dem Umbau (Sept. 2026) gibt es keine Überschrift "Lösung" mehr; das
+  // Spielende steht in `.daily-result-screen`: fixe Viewport-Höhe, darin ein
+  // scrollender Bereich (overflow-y: auto) mit der zentrierten Ergebnis-Spalte
+  // (Gruppen gelöst/Platz, Lösungs-Blätterer "1 / 4", "Tippen zum Fortfahren").
+  // Den Block hängen wir unten an diese Spalte (wie Geodle+). Den Scrollbereich
+  // finden wir über den berechneten Style statt über Tailwind-Klassen.
+  function findColumn() {
+    const screen = document.querySelector('.daily-result-screen');
+    if (!screen) return null; // Spiel läuft noch
+    const scroll = [...screen.children].find(
+      (e) => getComputedStyle(e).overflowY === 'auto',
     );
-    if (bySpan) return bySpan;
-    // Fallback: irgendein Blatt-Element, dessen Text exakt "Lösung" ist.
-    const leaves = document.querySelectorAll(
-      'h1, h2, h3, h4, p, div, label, strong, b',
-    );
-    for (const e of leaves) {
-      if (!e.children.length && e.textContent.trim() === 'Lösung') return e;
-    }
-    return null;
-  }
-
-  // Hängepunkt: hinter die Lösungs-Sektion, rein über die DOM-Struktur.
-  // Keine Klassen-Selektoren mehr – die konkreten Klassen variieren je nach
-  // Rechner/Fensterbreite. "Lösung" sitzt in einer Kopfzeile, diese in der
-  // Sektion -> wir gehen zwei Ebenen hoch und hängen den Block dahinter.
-  function findAnchor() {
-    const label = findLabel();
-    if (!label) return null;
-    const header = label.parentElement;
-    if (!header) return label;
-    return header.parentElement || header;
+    const column = scroll && scroll.firstElementChild;
+    return column ? { scroll, column } : null;
   }
 
   function insertBlock(data) {
     if (document.getElementById(BLOCK_ID)) return;
-    const anchor = findAnchor();
-    if (!anchor) return;
+    const target = findColumn();
+    if (!target) return;
     if (!data || !data.groups) return;
+    if (!document.getElementById(STYLE_ID)) {
+      const st = el('style');
+      st.id = STYLE_ID;
+      st.textContent = STYLE;
+      document.head.appendChild(st);
+    }
+    // Die Seite blockiert auf dem Desktop das Mausrad außerhalb von
+    // [data-allow-wheel] – ohne das Attribut wäre der Block nur per
+    // Scrollbalken erreichbar.
+    target.scroll.setAttribute('data-allow-wheel', 'true');
     const block = buildBlock(data);
-    anchor.insertAdjacentElement('afterend', block);
-    fixGroupBg(block);
+    block.style.marginTop = '1rem';
+    target.column.appendChild(block);
     console.log('[GC] Sortierter Lösungsblock eingefügt.');
   }
 
   function tick() {
     if (!location.pathname.includes('geoconnections')) return; // nur auf der GeoConnections-Seite
     if (document.getElementById(BLOCK_ID)) return;
-    if (!findAnchor()) return; // noch nicht gelöst -> nichts tun (kein Nachladen)
+    if (!findColumn()) return; // noch nicht gelöst -> nichts tun (kein Nachladen)
     ensureData()
       .then((data) => {
         if (data) insertBlock(data);
