@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GeoConnections+
 // @namespace    jago/geoconnections-solution-viewer
-// @version      3.8.0
+// @version      3.8.1
 // @description  Zeigt die Lösungsboxen am Spielende untereinander statt im Blätterer "1 / 4" und ergänzt eine KI-Prompt-Box.
 // @author       jago/claude
 // @license      MIT
@@ -37,6 +37,7 @@
   const TRACK_CLASS = 'gc-track';
   const NAV_CLASS = 'gc-nav';
   const UNCLIP_CLASS = 'gc-unclip';
+  const HEAD_CLASS = 'gc-slide-head';
   const STYLE = `
     #${BLOCK_ID} .gc-prompt { white-space: pre-wrap; opacity: 0.9; }
     /* Blätterer -> vertikale Liste: alle Lösungsboxen untereinander */
@@ -47,7 +48,8 @@
       gap: 1.25rem;
     }
     .${TRACK_CLASS} > * { width: 100% !important; }
-    .${NAV_CLASS} { display: none !important; }
+    .${NAV_CLASS},
+    .${HEAD_CLASS} { display: none !important; }
     /* feste Höhe/eigener Scrollbereich aufheben, damit der äußere
        Ergebnis-Screen alles am Stück scrollt */
     .${UNCLIP_CLASS} {
@@ -346,6 +348,26 @@
   // und per transform verschoben wird. Statt DOM umzubauen, markieren wir
   // Track, Navigation und die höhenbegrenzten Vorfahren mit eigenen Klassen
   // und kippen den Track per CSS in eine Spalte; React verwaltet das DOM weiter.
+  // Länder-Überschrift einer Lösungsbox ("Ägypten") – doppelt zur Kachel
+  // "Land: Ägypten". Bevorzugt ein h1–h6; sonst durch Einzel-Wrapper nach
+  // unten gehen und das erste Kind nehmen, wenn es reiner Text ohne Bild
+  // und ohne "Kategorie: Wert"-Doppelpunkt ist.
+  function slideHeading(slide) {
+    const h = slide.querySelector('h1,h2,h3,h4,h5,h6');
+    if (h) return h;
+    let node = slide;
+    while (node.children.length === 1) node = node.firstElementChild;
+    const first = node.firstElementChild;
+    if (
+      first &&
+      node.children.length > 1 &&
+      !first.querySelector('img,svg') &&
+      !first.textContent.includes(':')
+    )
+      return first;
+    return null;
+  }
+
   function stackSolutions(target) {
     const tracks = [
       ...target.column.querySelectorAll(
@@ -355,7 +377,11 @@
     for (const track of tracks) {
       track.classList.add(TRACK_CLASS);
       // Nicht aktuelle Boxen sind inert – jetzt alle sichtbar, also freigeben.
-      for (const slide of track.children) slide.removeAttribute('inert');
+      for (const slide of track.children) {
+        slide.removeAttribute('inert');
+        const head = slideHeading(slide);
+        if (head) head.classList.add(HEAD_CLASS);
+      }
       // "‹ 1 / 4 ›" direkt unter dem Rahmen
       const nav = track.parentElement.nextElementSibling;
       if (nav && nav.querySelectorAll('button').length === 2)
