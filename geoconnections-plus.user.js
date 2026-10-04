@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GeoConnections+
 // @namespace    jago/geoconnections-solution-viewer
-// @version      3.7.0
-// @description  Verbesserter zusätzlicher Lösungsblock plus KI-Prompt-Box.
+// @version      3.8.0
+// @description  Zeigt die Lösungsboxen am Spielende untereinander statt im Blätterer "1 / 4" und ergänzt eine KI-Prompt-Box.
 // @author       jago/claude
 // @license      MIT
 // @match        https://geotrivia.com/*
@@ -21,17 +21,7 @@
     '?';
   console.log('[GC] geladen (v' + VERSION + ') auf', location.href);
 
-  const BLOCK_ID = 'gc-sorted-solution';
-
-  // Original-Grünfilter (schwarzes mapsicon-SVG -> Geotrivia-Grün)
-  const SHAPE_FILTER =
-    'brightness(0) saturate(100%) invert(78%) sepia(21%) saturate(1057%) hue-rotate(43deg) brightness(91%) contrast(88%)';
-
-  // Grafikquellen
-  const FLAG_URL = (code) =>
-    `https://flagcdn.com/w320/${code.toLowerCase()}.png`;
-  const SHAPE_URL = (code) =>
-    `https://raw.githubusercontent.com/djaiss/mapsicon/master/all/${code.toLowerCase()}/vector.svg`;
+  const BLOCK_ID = 'gc-prompt-block';
 
   // ChatGPT mit vorausgefülltem Prompt öffnen (erfordert ChatGPT-Login)
   const CHATGPT_URL = (prompt) =>
@@ -43,34 +33,29 @@
     'Durchschnitts-Temp.': 'Durchschnittstemperatur',
   };
 
-  const TILE =
-    'relative bg-card border-2 border-border rounded-xl shadow-neo text-foreground flex items-center justify-center aspect-square overflow-hidden p-1.5';
-  // Schriftgrößen der Kacheln kommen aus eigenem CSS (siehe STYLE): Geotrivia
-  // liefert nur CSS für Tailwind-Klassen, die es selbst benutzt – text-[7px]
-  // & Co. gibt es dort nicht (mehr).
-  const CAP_CLS =
-    'gc-cap mb-1 block w-full max-w-full break-words font-black uppercase opacity-40 [overflow-wrap:anywhere]';
-  const VAL_CLS =
-    'gc-val line-clamp-3 w-full max-w-full break-words font-bold [overflow-wrap:anywhere]';
-  const STYLE_ID = 'gc-sorted-solution-style';
+  const STYLE_ID = 'gc-style';
+  const TRACK_CLASS = 'gc-track';
+  const NAV_CLASS = 'gc-nav';
+  const UNCLIP_CLASS = 'gc-unclip';
   const STYLE = `
-    #${BLOCK_ID} .gc-cap { font-size: 7px; line-height: 0.95; }
-    #${BLOCK_ID} .gc-val { font-size: 10px; line-height: 1.1; }
     #${BLOCK_ID} .gc-prompt { white-space: pre-wrap; opacity: 0.9; }
-    @media (min-width: 390px) { #${BLOCK_ID} .gc-val { font-size: 10.5px; } }
-    @media (min-width: 640px) { #${BLOCK_ID} .gc-val { font-size: 11px; } }
-    @media (min-width: 1200px) {
-      #${BLOCK_ID} .gc-cap { font-size: 8px; }
-      #${BLOCK_ID} .gc-val { font-size: 12px; }
+    /* Blätterer -> vertikale Liste: alle Lösungsboxen untereinander */
+    .${TRACK_CLASS} {
+      width: 100% !important;
+      transform: none !important;
+      flex-direction: column !important;
+      gap: 1.25rem;
+    }
+    .${TRACK_CLASS} > * { width: 100% !important; }
+    .${NAV_CLASS} { display: none !important; }
+    /* feste Höhe/eigener Scrollbereich aufheben, damit der äußere
+       Ergebnis-Screen alles am Stück scrollt */
+    .${UNCLIP_CLASS} {
+      height: auto !important;
+      max-height: none !important;
+      overflow: visible !important;
     }
   `;
-  // Gruppenfarben der Seite (CSS-Variablen), Hex-Werte nur als Rückfall
-  const GROUP_COLORS = {
-    1: 'var(--color-connection-1, #f8cd55)',
-    2: 'var(--color-connection-2, #8ccd60)',
-    3: 'var(--color-connection-3, #51acf9)',
-    4: 'var(--color-connection-4, #c9aaff)',
-  };
 
   const COPY_ICON =
     '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 256 256"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"></path></svg>';
@@ -210,68 +195,6 @@
     return (stat && stat.caption) || (sk && meta[sk] && meta[sk].label) || '';
   }
 
-  function captionedTile(cap, value) {
-    const t = el('div', TILE);
-    const inner = el(
-      'div',
-      'flex h-full w-full min-w-0 flex-col items-center justify-center text-center',
-    );
-    inner.appendChild(el('span', CAP_CLS, cap));
-    inner.appendChild(el('span', VAL_CLS, value));
-    t.appendChild(inner);
-    return t;
-  }
-
-  // Umriss-Kachel (schwarzes SVG -> Grün via Filter)
-  function shapeTile(code) {
-    const t = el('div', TILE);
-    const inner = el(
-      'div',
-      'absolute inset-0 flex items-center justify-center p-1.5 sm:p-2',
-    );
-    const img = document.createElement('img');
-    img.alt = code;
-    img.className = 'max-h-full max-w-full object-contain pointer-events-none';
-    img.loading = 'lazy';
-    img.style.filter = SHAPE_FILTER;
-    img.onerror = () => img.replaceWith(el('span', VAL_CLS, code));
-    img.src = SHAPE_URL(code);
-    inner.appendChild(img);
-    t.appendChild(inner);
-    return t;
-  }
-
-  // Flaggen-Kachel mit dezentem Rahmen (echtes Seitenverhältnis aus dem Bild)
-  function flagTile(code) {
-    const t = el('div', TILE);
-    const inner = el(
-      'div',
-      'absolute inset-0 flex items-center justify-center p-2',
-    );
-    const box = el(
-      'div',
-      'border border-border/20 overflow-hidden bg-white/90 box-border flex items-center justify-center',
-    );
-    box.style.width = '82%';
-    box.style.aspectRatio = '1.5';
-    const img = document.createElement('img');
-    img.alt = code;
-    img.className = 'block h-full w-full object-cover pointer-events-none';
-    img.loading = 'lazy';
-    img.onload = () => {
-      if (img.naturalWidth && img.naturalHeight)
-        box.style.aspectRatio = (
-          img.naturalWidth / img.naturalHeight
-        ).toString();
-    };
-    img.onerror = () => box.replaceWith(el('span', VAL_CLS, code));
-    img.src = FLAG_URL(code);
-    box.appendChild(img);
-    inner.appendChild(box);
-    t.appendChild(inner);
-    return t;
-  }
-
   // KI-Prompt-Box mit Copy- und ChatGPT-Button
   function buildPromptBox(prompt) {
     const box = el(
@@ -376,42 +299,17 @@
   }
 
   function buildBlock(data) {
-    const wrap = el(
-      'div',
-      'w-full max-w-[27rem] mx-auto flex flex-col shrink-0 mb-8',
-    );
+    const wrap = el('div', 'w-full max-w-[27rem] mx-auto flex flex-col shrink-0 mb-8');
     wrap.id = BLOCK_ID;
 
     const meta = data.categoryMeta || {};
+    // Prompt alphabetisch nach Ländern, unabhängig von der Lösungsreihenfolge
     const groups = [...data.groups].sort((a, b) =>
       regionName((a.title || '').toUpperCase()).localeCompare(
         regionName((b.title || '').toUpperCase()),
         'de',
       ),
     );
-
-    for (const g of groups) {
-      const { country, stat } = pickItems(g);
-      const code = (g.title || '').toUpperCase();
-      const name = regionName(code);
-      const level = g.level || 1;
-
-      const groupBox = el('div', 'rounded-2xl p-2 mb-2');
-      groupBox.style.backgroundColor = GROUP_COLORS[level] || '#999';
-
-      const grid = el('div', 'grid grid-cols-4 gap-1.5');
-      grid.appendChild(
-        captionedTile((country && country.caption) || 'Land', name),
-      );
-      grid.appendChild(flagTile(code));
-      grid.appendChild(shapeTile(code));
-      grid.appendChild(
-        captionedTile(statCaption(g, meta), stat ? stat.value : ''),
-      );
-
-      groupBox.appendChild(grid);
-      wrap.appendChild(groupBox);
-    }
 
     wrap.appendChild(buildPromptBox(buildPrompt(groups, meta)));
     return wrap;
@@ -422,7 +320,7 @@
   // Spielende steht in `.daily-result-screen`: fixe Viewport-Höhe, darin ein
   // scrollender Bereich (overflow-y: auto) mit der zentrierten Ergebnis-Spalte
   // (Gruppen gelöst/Platz, Lösungs-Blätterer "1 / 4", "Tippen zum Fortfahren").
-  // Den Block hängen wir unten an diese Spalte (wie Geodle+). Den Scrollbereich
+  // Die KI-Box hängen wir unten an diese Spalte (wie Geodle+). Den Scrollbereich
   // finden wir über den berechneten Style statt über Tailwind-Klassen.
   function findColumn() {
     const screen = document.querySelector('.daily-result-screen');
@@ -434,34 +332,70 @@
     return column ? { scroll, column } : null;
   }
 
-  function insertBlock(data) {
-    if (document.getElementById(BLOCK_ID)) return;
-    const target = findColumn();
-    if (!target) return;
-    if (!data || !data.groups) return;
-    if (!document.getElementById(STYLE_ID)) {
-      const st = el('style');
-      st.id = STYLE_ID;
-      st.textContent = STYLE;
-      document.head.appendChild(st);
+  function ensureStyle() {
+    if (document.getElementById(STYLE_ID)) return;
+    const st = el('style');
+    st.id = STYLE_ID;
+    st.textContent = STYLE;
+    document.head.appendChild(st);
+  }
+
+  // ---- Blätterer "‹ 1 / 4 ›" aufklappen (wie GeoRankle+) ----
+  // Der Blätterer ist ein Rahmen (overflow-hidden + touch-pan-y) mit einem
+  // Track, der ALLE Lösungsboxen nebeneinander enthält (style="width: 400%")
+  // und per transform verschoben wird. Statt DOM umzubauen, markieren wir
+  // Track, Navigation und die höhenbegrenzten Vorfahren mit eigenen Klassen
+  // und kippen den Track per CSS in eine Spalte; React verwaltet das DOM weiter.
+  function stackSolutions(target) {
+    const tracks = [
+      ...target.column.querySelectorAll(
+        'div.overflow-hidden.touch-pan-y > div[style*="width"]',
+      ),
+    ].filter((t) => t.children.length > 0);
+    for (const track of tracks) {
+      track.classList.add(TRACK_CLASS);
+      // Nicht aktuelle Boxen sind inert – jetzt alle sichtbar, also freigeben.
+      for (const slide of track.children) slide.removeAttribute('inert');
+      // "‹ 1 / 4 ›" direkt unter dem Rahmen
+      const nav = track.parentElement.nextElementSibling;
+      if (nav && nav.querySelectorAll('button').length === 2)
+        nav.classList.add(NAV_CLASS);
+      // Liegt der Blätterer in einer gerade verborgenen Ansicht
+      // (aria-hidden), Höhe nicht aufheben – sonst bliebe ein Loch.
+      const visible = !track.closest('[aria-hidden="true"]');
+      for (
+        let e = track.parentElement;
+        e && e !== target.column && e !== target.scroll;
+        e = e.parentElement
+      ) {
+        e.classList.toggle(UNCLIP_CLASS, visible);
+      }
     }
-    // Die Seite blockiert auf dem Desktop das Mausrad außerhalb von
-    // [data-allow-wheel] – ohne das Attribut wäre der Block nur per
-    // Scrollbalken erreichbar.
-    target.scroll.setAttribute('data-allow-wheel', 'true');
+  }
+
+  function insertBlock(data, target) {
+    if (document.getElementById(BLOCK_ID)) return;
+    if (!data || !data.groups) return;
     const block = buildBlock(data);
     block.style.marginTop = '1rem';
     target.column.appendChild(block);
-    console.log('[GC] Sortierter Lösungsblock eingefügt.');
+    console.log('[GC] KI-Prompt-Box eingefügt.');
   }
 
   function tick() {
     if (!location.pathname.includes('geoconnections')) return; // nur auf der GeoConnections-Seite
+    const target = findColumn();
+    if (!target) return; // noch nicht gelöst -> nichts tun (kein Nachladen)
+    ensureStyle();
+    stackSolutions(target);
+    // Die Seite blockiert auf dem Desktop das Mausrad außerhalb von
+    // [data-allow-wheel] – ohne das Attribut wäre unten nichts erreichbar.
+    target.scroll.setAttribute('data-allow-wheel', 'true');
     if (document.getElementById(BLOCK_ID)) return;
-    if (!findColumn()) return; // noch nicht gelöst -> nichts tun (kein Nachladen)
     ensureData()
       .then((data) => {
-        if (data) insertBlock(data);
+        const t = findColumn();
+        if (data && t) insertBlock(data, t);
       })
       .catch((e) => console.error('[GC] tick-Fehler', e));
   }
